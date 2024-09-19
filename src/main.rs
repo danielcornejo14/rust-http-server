@@ -5,6 +5,7 @@ use std::{
     io::{prelude::*, BufReader},
     net::{TcpListener, TcpStream},
 };
+use rust_http_server::ThreadPool;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Data {
@@ -21,14 +22,19 @@ fn load_data() -> Vec<Data> {
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let data = load_data();
+    let pool = ThreadPool::new(5);
     for stream in listener.incoming() {
         let stream = stream.unwrap();
 
-        handle_connection(stream, &data);
+        pool.execute(|| {
+            handle_connection(stream);
+        });
+
     }
 }
 
-fn handle_connection(mut stream: TcpStream, data: &Vec<Data>) {
+fn handle_connection(mut stream: TcpStream) {
+    println!("New Connection");
     let buf_reader = BufReader::new(&mut stream);
     let request_line = buf_reader.lines().next().unwrap().unwrap();
     println!("Request: {}", request_line);
