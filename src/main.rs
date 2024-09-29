@@ -1,7 +1,6 @@
 mod endpoints;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Result;
 use std::{
     fs,
     io::{prelude::*, BufReader},
@@ -135,8 +134,8 @@ fn handle_connection(mut stream: TcpStream) {
         "GET" => handle_get(&uri),
         "POST" => handle_post(&uri, &body),
         "PUT" => handle_put(&uri, &body),
-        "DELETE" => handle_delete(&uri),
-        "UPDATE" => handle_update(&uri, &body),
+        "DELETE" => handle_delete(&uri, &body),
+        "PATCH" => handle_patch(&uri, &body),
         _ => ("HTTP/1.1 405 METHOD NOT ALLOWED", "405 - Method Not Allowed".to_string()),
     };
 
@@ -166,13 +165,22 @@ fn handle_post<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
 }
 
 fn handle_put<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
-    ("HTTP/1.1 200 OK", format!("Resource at {} updated with data: {}", uri, body))
+    match uri {
+        "/put_entry" => (SERVER_RESPONSE_OK, endpoints::put_entry(body).to_string()),
+        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string())
+    }
 }
 
-fn handle_update<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
-    ("HTTP/1.1 200 OK", format!("Resource at {} partially updated with data: {}", uri, body))
+fn handle_patch<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
+    match uri {
+        "/patch_entry_name" => (SERVER_RESPONSE_OK, endpoints::patch_entry_name(body).to_string()),
+        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string())
+    }
 }
 
-fn handle_delete(uri: &str) -> (&str, String) {
-    ("HTTP/1.1 200 OK", format!("Resource at {} deleted", uri))
+fn handle_delete<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
+    match uri {
+        "/delete_entry" => (SERVER_RESPONSE_OK, endpoints::delete_entry(body).to_string()),
+        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string())
+    }
 }

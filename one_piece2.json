@@ -1,22 +1,11 @@
 [
   {
-    "id": 0,
-    "rank": "24,129",
-    "trend": "18",
-    "season": 1,
-    "episode": 1,
-    "name": "I'm Luffy! The Man Who Will Become the Pirate King!",
-    "start": 1999,
-    "total_votes": "647",
-    "average_rating": 7.6
-  },
-  {
     "id": 1,
     "rank": "29,290",
     "trend": "11",
     "season": 1,
     "episode": 2,
-    "name": "The Great Swordsman Appears! Pirate Hunter, Roronoa Zoro",
+    "name": "test",
     "start": 1999,
     "total_votes": "473",
     "average_rating": 7.8
