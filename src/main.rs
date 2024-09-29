@@ -1,3 +1,5 @@
+mod endpoints;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 use std::{
@@ -7,7 +9,6 @@ use std::{
     collections::HashMap,
 };
 use rust_http_server::ThreadPool;
-
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -143,20 +144,24 @@ fn handle_connection(mut stream: TcpStream) {
     let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{response_body}");
     stream.write_all(response.as_bytes()).unwrap();
 }
+
+const SERVER_RESPONSE_OK:&str = "HTTP/1.1 200 OK";
+const SERVER_RESPONSE_ERROR: &str = "HTTP/1.1 404 NOT FOUND";
+
 fn handle_get(uri: &str) -> (&str, String) {
     match uri {
-        "/" => ("HTTP/1.1 200 OK", "Welcome to the homepage!".to_string()),
-        "/hello" => ("HTTP/1.1 200 OK", "Hello, world!".to_string()),
-        "/data" => ("HTTP/1.1 200 OK", "Here is your data.".to_string()),
+        "/" => (SERVER_RESPONSE_OK, "Welcome to the homepage!".to_string()),
+        "/hello" => (SERVER_RESPONSE_OK, "Hello, world!".to_string()),
+        "/data" => (SERVER_RESPONSE_OK, "Here is your data.".to_string()),
+        "/entries" => (SERVER_RESPONSE_OK, endpoints::get_entries(0).to_string()),
         _ => ("HTTP/1.1 404 NOT FOUND", "404 - Not Found".to_string()),
     }
 }
 
 fn handle_post<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
-    if uri == "/submit" {
-        ("HTTP/1.1 201 CREATED", "Data submitted successfully.".to_string())
-    } else {
-        ("HTTP/1.1 404 NOT FOUND", "404 - Not Found".to_string())
+    match uri {
+        "/submit" =>(SERVER_RESPONSE_OK, endpoints::post_entry(body).to_string()),
+        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string())
     }
 }
 
