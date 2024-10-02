@@ -231,6 +231,8 @@ fn handle_delete<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::mpsc, time::Duration};
+
     use endpoints::{delete_entry, get_entries, patch_entry_name, post_entry, put_entry};
 
     use super::*;
@@ -304,18 +306,75 @@ mod tests {
     }
 
     #[test]
-    fn test_concurrent_get_requests() {
-        let handles: Vec<_> = (0..10)
-            .map(|_| {
-                std::thread::spawn(|| {
-                    let response = get_entries(10); // Simulate a GET request for 10 entries
-                    assert!(response.contains("name")); // Ensure the response is correct
-                })
-            })
-            .collect();
+    fn test_concurrent_post_requests() {
+        let pool = ThreadPool::new(5);
 
-        for handle in handles {
-            handle.join().unwrap();
+        let num_requests = 4;
+        let post_data = r#"{
+            "id": 1,
+            "rank": "Captain",
+            "trend": "up",
+            "season": 3,
+            "episode": 20,
+            "name": "Zoro",
+            "start": 2,
+            "total_votes": "200",
+            "average_rating": 8.9
+        }"#;
+
+        let (tx, rx) = mpsc::channel(); // Create a channel to track task completion
+
+        for _ in 0..num_requests {
+            let tx = tx.clone();
+            let post_data = post_data.to_string();
+
+            pool.execute(move || {
+                let (status_line, response) = handle_post("/submit", &post_data);
+                assert_eq!(status_line, "HTTP/1.1 200 OK");
+                assert!(response.contains("Success"));
+                tx.send(()).unwrap(); // Signal that the task is complete
+            });
+        }
+
+        // Wait for all requests to finish
+        for _ in 0..num_requests {
+            rx.recv_timeout(Duration::from_secs(2))
+                .expect("Test timed out");
+        }
+    }
+
+    #[test]
+    fn test_concurrent_get_requests() {
+        let pool = ThreadPool::new(5);
+
+        let num_requests = 5;
+
+        let expected_jsons = vec![
+            r#"{"id":3,"rank":"28,818","trend":"8","season":1,"episode":4,"name":"Luffy's Past! The Red-haired Shanks Appears!","start":1999,"total_votes":"449","average_rating":8.1}"#,
+            r#"{"id":4,"rank":"37,113","trend":"4","season":1,"episode":5,"name":"Fear, Mysterious Power! Pirate Clown Captain Buggy!","start":1999,"total_votes":"370","average_rating":7.5}"#,
+            r#"{"id":5,"rank":"36,209","trend":"4","season":1,"episode":6,"name":"Desperate Situation! Beast Tamer Mohji vs. Luffy!","start":1999,"total_votes":"364","average_rating":7.7}"#,
+            r#"{"id":6,"rank":"37,648","trend":"4","season":1,"episode":7,"name":"Sozetsu Ketto! Kengo Zoro VS Kyokugei no Kabaji!","start":1999,"total_votes":"344","average_rating":7.7}"#,
+            r#"{"id":7,"rank":"38,371","trend":"6","season":1,"episode":8,"name":"Shousha wa docchi? Akuma no mi no nouryoku taiketsu!","start":1999,"total_votes":"335","average_rating":7.7}"#,
+        ];
+
+        let (tx, rx) = mpsc::channel(); // Create a channel to track task completion
+
+        for i in 0..num_requests {
+            let tx = tx.clone();
+            let expected_json = expected_jsons[i].to_string();
+
+            pool.execute(move || {
+                let (status_line, response) = handle_get("/entries");
+                assert_eq!(status_line, "HTTP/1.1 200 OK");
+                assert!(response.contains(&expected_json));
+                tx.send(()).unwrap();
+            });
+        }
+
+        // Wait for all requests to finish
+        for _ in 0..num_requests {
+            rx.recv_timeout(Duration::from_secs(2))
+                .expect("Test timed out");
         }
     }
 }
