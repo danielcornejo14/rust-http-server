@@ -171,16 +171,16 @@ pub(crate) fn delete_entry(req: &str) -> &str {
             let file = File::open(file_path).expect("Failed to open file");
             let mut characters:Vec<Character> = serde_json::from_reader(file)
                 .expect("Error while parsing");
-            let mut flag:bool = false;
-            for mut character in characters.clone(){
-                if(character.id == delete_req.id){
-                    flag = true;
-                    break;
+
+            let index: Option<usize> = characters.iter().position(|&r| r.id==delete_req.id);
+            match index{
+                Ok(element_index) => {
+                    characters.remove(element_index);
+                },
+                Err(e) => {
+                    return "Error"
                 }
             }
-
-            if(!flag) { return "Error"; }
-            characters.remove(delete_req.id);
 
             let file = File::create(file_path).unwrap();
             let mut writer = BufWriter::new(file);
