@@ -1,13 +1,13 @@
 mod endpoints;
 
+use rust_http_server::ThreadPool;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs,
     io::{prelude::*, BufReader},
     net::{TcpListener, TcpStream},
-    collections::HashMap,
 };
-use rust_http_server::ThreadPool;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -52,11 +52,12 @@ fn main() {
         pool.execute(|| {
             handle_connection(stream);
         });
-
     }
 }
 
-fn parse_request(buf_reader: &mut BufReader<&mut TcpStream>) -> std::result::Result<(String, String, HashMap<String, String>, String), RequestError> {
+fn parse_request(
+    buf_reader: &mut BufReader<&mut TcpStream>,
+) -> std::result::Result<(String, String, HashMap<String, String>, String), RequestError> {
     let mut request_line = String::new();
     if buf_reader.read_line(&mut request_line).is_err() {
         return Err(RequestError::ReadRequestLineError);
@@ -84,7 +85,10 @@ fn parse_request(buf_reader: &mut BufReader<&mut TcpStream>) -> std::result::Res
 
         let header_parts: Vec<&str> = header_line.splitn(2, ": ").collect();
         if header_parts.len() == 2 {
-            headers.insert(header_parts[0].to_string(), header_parts[1].trim().to_string());
+            headers.insert(
+                header_parts[0].to_string(),
+                header_parts[1].trim().to_string(),
+            );
         } else {
             return Err(RequestError::InvalidHeaderLine(header_line));
         }
@@ -136,7 +140,10 @@ fn handle_connection(mut stream: TcpStream) {
         "PUT" => handle_put(&uri, &body),
         "DELETE" => handle_delete(&uri, &body),
         "PATCH" => handle_patch(&uri, &body),
-        _ => ("HTTP/1.1 405 METHOD NOT ALLOWED", "405 - Method Not Allowed".to_string()),
+        _ => (
+            "HTTP/1.1 405 METHOD NOT ALLOWED",
+            "405 - Method Not Allowed".to_string(),
+        ),
     };
 
     let length = response_body.len();
@@ -144,7 +151,7 @@ fn handle_connection(mut stream: TcpStream) {
     stream.write_all(response.as_bytes()).unwrap();
 }
 
-const SERVER_RESPONSE_OK:&str = "HTTP/1.1 200 OK";
+const SERVER_RESPONSE_OK: &str = "HTTP/1.1 200 OK";
 const SERVER_RESPONSE_ERROR: &str = "HTTP/1.1 404 NOT FOUND";
 
 fn handle_get(uri: &str) -> (&str, String) {
@@ -159,28 +166,125 @@ fn handle_get(uri: &str) -> (&str, String) {
 
 fn handle_post<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
     match uri {
-        "/submit" =>(SERVER_RESPONSE_OK, endpoints::post_entry(body).to_string()),
-        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string())
+        "/submit" => (SERVER_RESPONSE_OK, endpoints::post_entry(body).to_string()),
+        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string()),
     }
 }
 
 fn handle_put<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
     match uri {
         "/put_entry" => (SERVER_RESPONSE_OK, endpoints::put_entry(body).to_string()),
-        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string())
+        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string()),
     }
 }
 
 fn handle_patch<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
     match uri {
-        "/patch_entry_name" => (SERVER_RESPONSE_OK, endpoints::patch_entry_name(body).to_string()),
-        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string())
+        "/patch_entry_name" => (
+            SERVER_RESPONSE_OK,
+            endpoints::patch_entry_name(body).to_string(),
+        ),
+        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string()),
     }
 }
 
 fn handle_delete<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
     match uri {
-        "/delete_entry" => (SERVER_RESPONSE_OK, endpoints::delete_entry(body).to_string()),
-        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string())
+        "/delete_entry" => (
+            SERVER_RESPONSE_OK,
+            endpoints::delete_entry(body).to_string(),
+        ),
+        _ => (SERVER_RESPONSE_ERROR, "404 - Not Found".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use endpoints::{delete_entry, get_entries, patch_entry_name, post_entry, put_entry};
+
+    use super::*;
+
+    // HTTP Operations Unit Tests
+
+    #[test]
+    fn test_get_entries() {
+        let response = get_entries(5); // Get 5 entries
+        print!("{}", response);
+
+        let expected_json = r#"{"id":1,"rank":"29,290","trend":"11","season":1,"episode":2,"name":"test","start":1999,"total_votes":"473","average_rating":7.8}"#;
+
+        assert!(response.contains(expected_json));
+    }
+
+    #[test]
+    fn test_post_entry() {
+        let new_character = r#"{
+            "id": 0,
+            "rank": "Captain", 
+            "trend": "up", 
+            "season": 3, 
+            "episode": 20, 
+            "name": "Zoro", 
+            "start": 2, 
+            "total_votes": "200", 
+            "average_rating": 8.9
+        }"#;
+
+        let response = post_entry(new_character);
+        print!("{}", response);
+        assert_eq!(response, "Success!"); // Ensure the response indicates success
+    }
+
+    #[test]
+    fn test_put_entry() {
+        let updated_character = r#"{
+            "id": 1,
+            "rank": "Pirate King", 
+            "trend": "up", 
+            "season": 10, 
+            "episode": 100, 
+            "name": "Monkey D. Luffy", 
+            "start": 1, 
+            "total_votes": "100000", 
+            "average_rating": 9.9
+        }"#;
+
+        let response = put_entry(updated_character);
+        assert_eq!(response, "Success!"); // Ensure the response indicates success
+    }
+
+    #[test]
+    fn test_delete_entry() {
+        let delete_request = r#"{"id": 3}"#;
+
+        let response = delete_entry(delete_request);
+        assert_eq!(response, "Success!"); // Ensure the entry is deleted successfully
+    }
+
+    #[test]
+    fn test_patch_entry_name() {
+        let patch_request = r#"{
+            "id": 1,
+            "name": "Pirate King Luffy"
+        }"#;
+
+        let response = patch_entry_name(patch_request);
+        assert_eq!(response, "Success"); // Ensure the patch operation succeeds
+    }
+
+    #[test]
+    fn test_concurrent_get_requests() {
+        let handles: Vec<_> = (0..10)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    let response = get_entries(10); // Simulate a GET request for 10 entries
+                    assert!(response.contains("name")); // Ensure the response is correct
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }
