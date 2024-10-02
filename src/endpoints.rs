@@ -160,25 +160,25 @@ pub(crate) fn patch_entry_name(req: &str) -> &str {
 //removes an entry from the .json file
 pub(crate) fn delete_entry(req: &str) -> &str {
     #[derive(Deserialize)]
-    struct Delete{
-        id: usize
+    struct Delete {
+        id: usize,
     }
 
-    let req:Result<Delete, serde_json::Error> = serde_json::from_str(req);
-    match req{
+    let req: Result<Delete, serde_json::Error> = serde_json::from_str(req);
+    match req {
         Ok(delete_req) => {
             let file_path = Path::new("one_piece2.json");
             let file = File::open(file_path).expect("Failed to open file");
-            let mut characters:Vec<Character> = serde_json::from_reader(file)
+            let mut characters: Vec<Character> = serde_json::from_reader(file)
                 .expect("Error while parsing");
 
-            let index: Option<usize> = characters.iter().position(|&r| r.id==delete_req.id);
-            match index{
-                Ok(element_index) => {
+            let index: Option<usize> = characters.iter().position(|r| r.id == delete_req.id);
+            match index {
+                Some(element_index) => {
                     characters.remove(element_index);
-                },
-                Err(e) => {
-                    return "Error"
+                }
+                None => {
+                    return "Error: Character not found";
                 }
             }
 
@@ -188,10 +188,9 @@ pub(crate) fn delete_entry(req: &str) -> &str {
 
             // Optionally, add a newline for better formatting
             writer.write_all(b"\n").unwrap();
-
         }
-        Err(e) => {
-            return "Error"
+        Err(_) => {
+            return "Error: Invalid request format";
         }
     }
     "Success!"

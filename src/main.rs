@@ -55,6 +55,24 @@ fn main() {
     }
 }
 
+fn parse_cookies(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut cookies = HashMap::new();
+    if let Some(cookie_header) = headers.get("Cookie") {
+        for cookie in cookie_header.split(';') {
+            let parts: Vec<&str> = cookie.splitn(2, '=').collect();
+            if parts.len() == 2 {
+                cookies.insert(parts[0].trim().to_string(), parts[1].trim().to_string());
+            }
+        }
+    }
+    cookies
+}
+
+fn set_cookie(response_headers: &mut HashMap<String, String>, name: &str, value: &str) {
+    let cookie = format!("{}={}; Path=/; HttpOnly", name, value);
+    response_headers.insert("Set-Cookie".to_string(), cookie);
+}
+
 fn parse_request(
     buf_reader: &mut BufReader<&mut TcpStream>,
 ) -> std::result::Result<(String, String, HashMap<String, String>, String), RequestError> {
@@ -134,6 +152,16 @@ fn handle_connection(mut stream: TcpStream) {
     println!("Headers: {:?}", headers);
     println!("Body: {}", body);
 
+    // Parse cookies from the request
+    let cookies = parse_cookies(&headers);
+    println!("Cookies: {:?}", cookies);
+
+    // Prepare response headers
+    let mut response_headers = HashMap::new();
+
+    // Set a cookie in the response
+    set_cookie(&mut response_headers, "session_id", "123456");
+
     let (status_line, response_body) = match method.as_str() {
         "GET" => handle_get(&uri),
         "POST" => handle_post(&uri, &body),
@@ -147,7 +175,10 @@ fn handle_connection(mut stream: TcpStream) {
     };
 
     let length = response_body.len();
-    let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{response_body}");
+    let response = format!(
+        "{status_line}\r\nContent-Length: {length}\r\nSet-Cookie: {}\r\n\r\n{response_body}",
+        response_headers.get("Set-Cookie").unwrap()
+    );
     stream.write_all(response.as_bytes()).unwrap();
 }
 
