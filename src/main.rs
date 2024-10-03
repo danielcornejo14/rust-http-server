@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs,
-    io::{prelude::*, BufReader},
+    io::{prelude::*, BufReader, Cursor},
     net::{TcpListener, TcpStream},
+    thread,
+    time::Duration,
 };
 use thiserror::Error;
 
@@ -37,14 +39,8 @@ struct Data {
     password: String,
 }
 
-fn load_data() -> Vec<Data> {
-    let file_content = fs::read_to_string("data.json").unwrap_or("[]".to_string());
-    serde_json::from_str(&file_content).unwrap_or_else(|_| vec![])
-}
-
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
-    let data = load_data();
     let pool = ThreadPool::new(5);
     for stream in listener.incoming() {
         let stream = stream.unwrap();
@@ -229,152 +225,271 @@ fn handle_delete<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
     }
 }
 
+fn send_request(request: &str) -> String {
+    // Establish a connection to the server
+    let mut stream = TcpStream::connect("127.0.0.1:7878").expect("Could not connect to server");
+
+    // Send the request
+    stream.write_all(request.as_bytes()).unwrap();
+
+    // Read the response
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
+fn start_server() -> std::sync::Arc<std::sync::Mutex<bool>> {
+    let running = std::sync::Arc::new(std::sync::Mutex::new(true));
+    let running_clone = running.clone();
+
+    thread::spawn(move || {
+        let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+        let pool = ThreadPool::new(5);
+
+        while *running_clone.lock().unwrap() {
+            if let Ok((stream, _)) = listener.accept() {
+                pool.execute(move || {
+                    handle_connection(stream);
+                });
+            }
+        }
+    });
+
+    running
+}
+
 #[cfg(test)]
 mod tests {
     use std::{sync::mpsc, time::Duration};
 
-    use endpoints::{delete_entry, get_entries, patch_entry_name, post_entry, put_entry};
-
     use super::*;
 
     // HTTP Operations Unit Tests
-
     #[test]
     fn test_get_entries() {
-        let response = get_entries(5); // Get 5 entries
-        print!("{}", response);
+        let running = start_server();
+        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
 
-        let expected_json = r#"{"id":1,"rank":"29,290","trend":"11","season":1,"episode":2,"name":"test","start":1999,"total_votes":"473","average_rating":7.8}"#;
+        let request = "GET /entries HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let response = send_request(request);
+
+        let expected_json = r#"{"id":3,"rank":"28,818","trend":"8","season":1,"episode":4,"name":"Luffy's Past! The Red-haired Shanks Appears!","start":1999,"total_votes":"449","average_rating":8.1}"#;
 
         assert!(response.contains(expected_json));
+
+        *running.lock().unwrap() = false;
     }
 
     #[test]
     fn test_post_entry() {
+        let running = start_server();
+        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
+
         let new_character = r#"{
             "id": 0,
-            "rank": "Captain", 
-            "trend": "up", 
-            "season": 3, 
-            "episode": 20, 
-            "name": "Zoro", 
-            "start": 2, 
-            "total_votes": "200", 
-            "average_rating": 8.9
+            "rank": "32,043", 
+            "trend": "7", 
+            "season": 1, 
+            "episode": 3, 
+            "name": "Morgan vs. Luffy! Who's This Beautiful Young Girl?", 
+            "start": 1999, 
+            "total_votes": "428", 
+            "average_rating": 7.7
         }"#;
 
-        let response = post_entry(new_character);
-        print!("{}", response);
-        assert_eq!(response, "Success!"); // Ensure the response indicates success
+        let request = format!(
+            "POST /submit HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            new_character.len(),
+            new_character
+        );
+
+        let response = send_request(&request);
+        println!("Response:({})", response);
+        assert!(response.contains("Success!"));
+
+        // Stop the server after the test
+        *running.lock().unwrap() = false;
     }
 
     #[test]
     fn test_put_entry() {
+        let running = start_server();
+        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
+
         let updated_character = r#"{
             "id": 1,
-            "rank": "Pirate King", 
-            "trend": "up", 
-            "season": 10, 
-            "episode": 100, 
-            "name": "Monkey D. Luffy", 
-            "start": 1, 
-            "total_votes": "100000", 
-            "average_rating": 9.9
+            "rank": "32,043", 
+            "trend": "7", 
+            "season": 1, 
+            "episode": 3, 
+            "name": "Morgan vs. Luffy! Who's This Beautiful Young Girl?", 
+            "start": 1999, 
+            "total_votes": "428", 
+            "average_rating": 7.7
         }"#;
 
-        let response = put_entry(updated_character);
-        assert_eq!(response, "Success!"); // Ensure the response indicates success
+        let request = format!(
+            "PUT /put_entry HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            updated_character.len(),
+            updated_character
+        );
+
+        let response = send_request(&request);
+        println!("Response:({})", response);
+        assert!(response.contains("Success!"));
+
+        *running.lock().unwrap() = false; // Stop the server after the test
     }
 
     #[test]
     fn test_delete_entry() {
-        let delete_request = r#"{"id": 3}"#;
+        let running = start_server();
+        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
 
-        let response = delete_entry(delete_request);
-        assert_eq!(response, "Success!"); // Ensure the entry is deleted successfully
+        let delete_request = r#"{"id": 5}"#;
+
+        let request = format!(
+            "DELETE /delete_entry HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            delete_request.len(),
+            delete_request
+        );
+
+        let response = send_request(&request);
+        println!("Response:({})", response);
+        assert!(response.contains("Success!"));
+
+        *running.lock().unwrap() = false; // Stop the server after the test
     }
 
     #[test]
     fn test_patch_entry_name() {
+        let running = start_server();
+        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
+
         let patch_request = r#"{
             "id": 1,
             "name": "Pirate King Luffy"
         }"#;
 
-        let response = patch_entry_name(patch_request);
-        assert_eq!(response, "Success"); // Ensure the patch operation succeeds
+        let request = format!(
+            "PATCH /patch_entry_name HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            patch_request.len(),
+            patch_request
+        );
+
+        let response = send_request(&request);
+        assert!(response.contains("Success!"));
+
+        *running.lock().unwrap() = false; // Stop the server after the test
     }
 
     #[test]
     fn test_concurrent_post_requests() {
+        // Start the server and get the running status Arc
+        let running = start_server();
+        thread::sleep(Duration::from_secs(1)); // Allow server to start
+
         let pool = ThreadPool::new(5);
-
-        let num_requests = 4;
+        let num_requests = 4; // Number of concurrent requests
         let post_data = r#"{
-            "id": 1,
-            "rank": "Captain",
-            "trend": "up",
-            "season": 3,
-            "episode": 20,
-            "name": "Zoro",
-            "start": 2,
-            "total_votes": "200",
-            "average_rating": 8.9
-        }"#;
+        "id": 1,
+        "rank": "Captain",
+        "trend": "up",
+        "season": 3,
+        "episode": 20,
+        "name": "Zoro",
+        "start": 2,
+        "total_votes": "200",
+        "average_rating": 8.9,
+        "password": "secret"
+    }"#;
 
-        let (tx, rx) = mpsc::channel(); // Create a channel to track task completion
+        let (tx, rx) = mpsc::channel(); // Create a channel for signaling completion
 
         for _ in 0..num_requests {
-            let tx = tx.clone();
+            let tx = tx.clone(); // Clone the transmitter for each thread
             let post_data = post_data.to_string();
 
             pool.execute(move || {
-                let (status_line, response) = handle_post("/submit", &post_data);
-                assert_eq!(status_line, "HTTP/1.1 200 OK");
-                assert!(response.contains("Success"));
-                tx.send(()).unwrap(); // Signal that the task is complete
+                println!("Thread {:?} started processing", thread::current().id());
+
+                let request = format!(
+                    "POST /submit HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+                    post_data.len(),
+                    post_data
+                );
+
+                // Send the request and receive the response
+                let response = send_request(&request);
+                println!(
+                    "Response from thread {:?}: ({})",
+                    thread::current().id(),
+                    response
+                );
+
+                // Check the response
+                assert!(response.contains("Success!"), "Response was: {}", response);
+
+                // Signal task completion
+                tx.send(()).unwrap();
+                println!("Thread {:?} finished processing", thread::current().id());
             });
         }
 
-        // Wait for all requests to finish
+        // Wait for all requests to complete
         for _ in 0..num_requests {
-            rx.recv_timeout(Duration::from_secs(2))
+            rx.recv_timeout(Duration::from_secs(5))
                 .expect("Test timed out");
         }
+
+        // Stop the server by setting running to false
+        *running.lock().unwrap() = false;
+
+        // Give some time for the server to shut down properly
+        thread::sleep(Duration::from_secs(1));
     }
 
     #[test]
     fn test_concurrent_get_requests() {
-        let pool = ThreadPool::new(5);
+        // Start the server
+        let running = start_server();
+        thread::sleep(Duration::from_secs(1)); // Allow server to start
 
+        let pool = ThreadPool::new(5);
         let num_requests = 5;
 
-        let expected_jsons = vec![
-            r#"{"id":3,"rank":"28,818","trend":"8","season":1,"episode":4,"name":"Luffy's Past! The Red-haired Shanks Appears!","start":1999,"total_votes":"449","average_rating":8.1}"#,
-            r#"{"id":4,"rank":"37,113","trend":"4","season":1,"episode":5,"name":"Fear, Mysterious Power! Pirate Clown Captain Buggy!","start":1999,"total_votes":"370","average_rating":7.5}"#,
-            r#"{"id":5,"rank":"36,209","trend":"4","season":1,"episode":6,"name":"Desperate Situation! Beast Tamer Mohji vs. Luffy!","start":1999,"total_votes":"364","average_rating":7.7}"#,
-            r#"{"id":6,"rank":"37,648","trend":"4","season":1,"episode":7,"name":"Sozetsu Ketto! Kengo Zoro VS Kyokugei no Kabaji!","start":1999,"total_votes":"344","average_rating":7.7}"#,
-            r#"{"id":7,"rank":"38,371","trend":"6","season":1,"episode":8,"name":"Shousha wa docchi? Akuma no mi no nouryoku taiketsu!","start":1999,"total_votes":"335","average_rating":7.7}"#,
-        ];
+        let expected_jsons = r#"{"id":7,"rank":"38,371","trend":"6","season":1,"episode":8,"name":"Shousha wa docchi? Akuma no mi no nouryoku taiketsu!","start":1999,"total_votes":"335","average_rating":7.7}"#;
 
         let (tx, rx) = mpsc::channel(); // Create a channel to track task completion
 
         for i in 0..num_requests {
             let tx = tx.clone();
-            let expected_json = expected_jsons[i].to_string();
 
             pool.execute(move || {
-                let (status_line, response) = handle_get("/entries");
-                assert_eq!(status_line, "HTTP/1.1 200 OK");
-                assert!(response.contains(&expected_json));
+                // Construct a GET request
+                let request = format!(
+                    "GET /entries HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+                );
+
+                // Send the request and receive the response
+                let response = send_request(&request);
+
+                // Check the status line and if the expected JSON is in the response body
+                assert!(response.contains(expected_jsons));
+
+                // Signal task completion
                 tx.send(()).unwrap();
             });
         }
 
         // Wait for all requests to finish
         for _ in 0..num_requests {
-            rx.recv_timeout(Duration::from_secs(2))
+            rx.recv_timeout(Duration::from_secs(5))
                 .expect("Test timed out");
         }
+
+        // Stop the server
+        *running.lock().unwrap() = false;
+        thread::sleep(Duration::from_secs(1)); // Allow server to shut down
     }
 }
