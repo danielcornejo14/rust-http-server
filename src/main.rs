@@ -142,6 +142,25 @@ fn parse_request(
         }
     }
 
+    // Check Content-Type and parse body accordingly
+    if let Some(content_type) = headers.get("Content-Type") {
+        match content_type.as_str() {
+            "application/json" => {
+                // Handle JSON body
+                if let Err(e) = serde_json::from_str::<serde_json::Value>(&body) {
+                    return Err(RequestError::InvalidRequestLineFormat);
+                }
+            }
+            "text/plain" => {
+                // Handle plain text body
+                // No additional parsing needed for plain text
+            }
+            _ => {
+                return Err(RequestError::InvalidRequestLineFormat);
+            }
+        }
+    }
+
     Ok((method, uri, headers, body))
 }
 
