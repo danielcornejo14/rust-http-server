@@ -7,7 +7,9 @@ use std::{
     fs,
     io::{prelude::*, BufReader},
     net::{TcpListener, TcpStream},
+    time::{SystemTime, Duration},
 };
+use chrono::{DateTime, Utc, TimeZone};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -68,9 +70,19 @@ fn parse_cookies(headers: &HashMap<String, String>) -> HashMap<String, String> {
     cookies
 }
 
-fn set_cookie(response_headers: &mut HashMap<String, String>, name: &str, value: &str) {
-    let cookie = format!("{}={}; Path=/; HttpOnly", name, value);
-    response_headers.insert("Set-Cookie".to_string(), cookie);
+fn set_cookie(cookies: &mut Vec<String>, name: &str, value: &str, expires: Option<&str>) {
+    let mut cookie = format!("{}={}; Path=/; HttpOnly", name, value);
+    if let Some(expiration_date) = expires {
+        cookie = format!("{}; Expires={}", cookie, expiration_date);
+    }
+    cookies.push(cookie);
+}
+
+fn is_cookie_expired(expiration_date: &str) -> bool {
+    if let Ok(expiration) = DateTime::parse_from_rfc2822(expiration_date) {
+        return expiration < Utc::now();
+    }
+    false
 }
 
 fn parse_request(
@@ -156,11 +168,27 @@ fn handle_connection(mut stream: TcpStream) {
     let cookies = parse_cookies(&headers);
     println!("Cookies: {:?}", cookies);
 
+    // Parse cookies from the request
+    let cookies = parse_cookies(&headers);
+    let mut valid_cookies = HashMap::new();
+    for (name, value) in cookies {
+        if !is_cookie_expired(&value) {
+            valid_cookies.insert(name, value);
+        }
+    }
+    println!("Valid Cookies: {:?}", valid_cookies);
+
     // Prepare response headers
-    let mut response_headers = HashMap::new();
+    let mut response_headers: HashMap<String, String> = HashMap::new();
+    let mut set_cookie_headers = Vec::new();
+
+    // Set a cookie expiration time
+    let expiration_time = SystemTime::now() + Duration::from_secs(30);
+    let datetime: DateTime<Utc> = DateTime::<Utc>::from(expiration_time);
+    let expiration = datetime.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
     // Set a cookie in the response
-    set_cookie(&mut response_headers, "session_id", "123456");
+    set_cookie(&mut set_cookie_headers, "session", "123456", Some(expiration.as_str()));
 
     let (status_line, response_body) = match method.as_str() {
         "GET" => handle_get(&uri),
@@ -175,10 +203,13 @@ fn handle_connection(mut stream: TcpStream) {
     };
 
     let length = response_body.len();
-    let response = format!(
-        "{status_line}\r\nContent-Length: {length}\r\nSet-Cookie: {}\r\n\r\n{response_body}",
-        response_headers.get("Set-Cookie").unwrap()
-    );
+    let mut response = format!("{status_line}\r\nContent-Length: {length}\r\n");
+
+    for cookie in set_cookie_headers {
+        response.push_str(&format!("Set-Cookie: {}\r\n", cookie));
+    }
+
+    response.push_str(&format!("\r\n{response_body}"));
     stream.write_all(response.as_bytes()).unwrap();
 }
 
