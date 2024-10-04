@@ -80,6 +80,12 @@ fn is_cookie_expired(expiration_date: &str) -> bool {
     false
 }
 
+fn get_cookie_expiration(duration_secs: u64) -> String {
+    let expiration_time = SystemTime::now() + Duration::from_secs(duration_secs);
+    let datetime: DateTime<Utc> = DateTime::<Utc>::from(expiration_time);
+    datetime.format("%a, %d %b %Y %H:%M:%S GMT").to_string()
+}
+
 fn parse_request(
     buf_reader: &mut BufReader<&mut TcpStream>,
 ) -> std::result::Result<(String, String, HashMap<String, String>, String), RequestError> {
@@ -197,12 +203,12 @@ fn handle_connection(mut stream: TcpStream) {
     let mut set_cookie_headers = Vec::new();
 
     // Set a cookie expiration time
-    let expiration_time = SystemTime::now() + Duration::from_secs(30);
-    let datetime: DateTime<Utc> = DateTime::<Utc>::from(expiration_time);
-    let expiration = datetime.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+    let expiration_old = get_cookie_expiration(0);
+    let expiration_new = get_cookie_expiration(30);
 
     // Set a cookie in the response
-    set_cookie(&mut set_cookie_headers, "session", "123456", Some(expiration.as_str()));
+    set_cookie(&mut set_cookie_headers, "old_cookie", "won't_be_set", Some(expiration_old.as_str()));
+    set_cookie(&mut set_cookie_headers, "new_cookie", "will_be_set_but_won't_last_long", Some(expiration_new.as_str()));
 
     let (status_line, response_body) = match method.as_str() {
         "GET" => handle_get(&uri),
