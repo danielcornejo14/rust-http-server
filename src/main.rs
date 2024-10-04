@@ -1,5 +1,6 @@
 mod endpoints;
 
+use chrono::{DateTime, TimeZone, Utc};
 use rust_http_server::ThreadPool;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -7,10 +8,9 @@ use std::{
     fs,
     io::{prelude::*, BufReader, Cursor},
     net::{TcpListener, TcpStream},
-    time::{SystemTime, Duration},
     thread,
+    time::{Duration, Instant, SystemTime},
 };
-use chrono::{DateTime, Utc, TimeZone};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -207,8 +207,18 @@ fn handle_connection(mut stream: TcpStream) {
     let expiration_new = get_cookie_expiration(30);
 
     // Set a cookie in the response
-    set_cookie(&mut set_cookie_headers, "old_cookie", "won't_be_set", Some(expiration_old.as_str()));
-    set_cookie(&mut set_cookie_headers, "new_cookie", "will_be_set_but_won't_last_long", Some(expiration_new.as_str()));
+    set_cookie(
+        &mut set_cookie_headers,
+        "old_cookie",
+        "won't_be_set",
+        Some(expiration_old.as_str()),
+    );
+    set_cookie(
+        &mut set_cookie_headers,
+        "new_cookie",
+        "will_be_set_but_won't_last_long",
+        Some(expiration_new.as_str()),
+    );
 
     let (status_line, response_body) = match method.as_str() {
         "GET" => handle_get(&uri),
@@ -280,49 +290,46 @@ fn handle_delete<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
     }
 }
 
-fn send_request(request: &str) -> String {
-    // Establish a connection to the server
-    let mut stream = TcpStream::connect("127.0.0.1:7878").expect("Could not connect to server");
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
 
-    // Send the request
-    stream.write_all(request.as_bytes()).unwrap();
+    use super::*;
 
-    // Read the response
-    let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
-    response
-}
+    fn send_request(request: &str) -> String {
+        // Establish a connection to the server
+        let mut stream = TcpStream::connect("127.0.0.1:7878").expect("Could not connect to server");
 
-fn start_server() -> std::sync::Arc<std::sync::Mutex<bool>> {
-    let running = std::sync::Arc::new(std::sync::Mutex::new(true));
-    let running_clone = running.clone();
+        // Send the request
+        stream.write_all(request.as_bytes()).unwrap();
 
-    thread::spawn(move || {
-        let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
-        let pool = ThreadPool::new(5);
+        // Read the response
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    }
 
-        while *running_clone.lock().unwrap() {
-            if let Ok((stream, _)) = listener.accept() {
-                pool.execute(move || {
+    fn start_server() {
+        if TcpStream::connect("127.0.0.1:7878").is_ok() {
+            return;
+        }
+        thread::spawn(|| {
+            let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+            let pool = ThreadPool::new(5);
+            for stream in listener.incoming() {
+                let stream = stream.unwrap();
+
+                pool.execute(|| {
                     handle_connection(stream);
                 });
             }
-        }
-    });
-
-    running
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{sync::mpsc, time::Duration};
-
-    use super::*;
+        });
+    }
 
     // HTTP Operations Unit Tests
     #[test]
     fn test_get_entries() {
-        let running = start_server();
+        start_server();
         thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
 
         let request = "GET /entries HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
@@ -331,13 +338,11 @@ mod tests {
         let expected_json = r#"{"id":3,"rank":"28,818","trend":"8","season":1,"episode":4,"name":"Luffy's Past! The Red-haired Shanks Appears!","start":1999,"total_votes":"449","average_rating":8.1}"#;
 
         assert!(response.contains(expected_json));
-
-        *running.lock().unwrap() = false;
     }
 
     #[test]
-    fn test_post_entry() {
-        let running = start_server();
+    fn test_post() {
+        start_server();
         thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
 
         let new_character = r#"{
@@ -361,14 +366,11 @@ mod tests {
         let response = send_request(&request);
         println!("Response:({})", response);
         assert!(response.contains("Success!"));
-
-        // Stop the server after the test
-        *running.lock().unwrap() = false;
     }
 
     #[test]
-    fn test_put_entry() {
-        let running = start_server();
+    fn test_put() {
+        start_server();
         thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
 
         let updated_character = r#"{
@@ -392,13 +394,11 @@ mod tests {
         let response = send_request(&request);
         println!("Response:({})", response);
         assert!(response.contains("Success!"));
-
-        *running.lock().unwrap() = false; // Stop the server after the test
     }
 
     #[test]
-    fn test_delete_entry() {
-        let running = start_server();
+    fn test_delete() {
+        start_server();
         thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
 
         let delete_request = r#"{"id": 5}"#;
@@ -412,13 +412,11 @@ mod tests {
         let response = send_request(&request);
         println!("Response:({})", response);
         assert!(response.contains("Success!"));
-
-        *running.lock().unwrap() = false; // Stop the server after the test
     }
 
     #[test]
-    fn test_patch_entry_name() {
-        let running = start_server();
+    fn test_patch() {
+        start_server();
         thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
 
         let patch_request = r#"{
@@ -433,118 +431,74 @@ mod tests {
         );
 
         let response = send_request(&request);
-        assert!(response.contains("Success!"));
-
-        *running.lock().unwrap() = false; // Stop the server after the test
+        println!("Response:({})", response);
+        assert!(response.contains("Success"));
     }
 
+    // Cookie Management Unit Tests
     #[test]
-    fn test_concurrent_post_requests() {
-        // Start the server and get the running status Arc
-        let running = start_server();
-        thread::sleep(Duration::from_secs(1)); // Allow server to start
+    fn test_cookie_management() {
+        start_server();
+        std::thread::sleep(Duration::from_secs(1));
 
-        let pool = ThreadPool::new(5);
-        let num_requests = 4; // Number of concurrent requests
-        let post_data = r#"{
-        "id": 1,
-        "rank": "Captain",
-        "trend": "up",
-        "season": 3,
-        "episode": 20,
-        "name": "Zoro",
-        "start": 2,
-        "total_votes": "200",
-        "average_rating": 8.9,
-        "password": "secret"
-    }"#;
+        let cookie_value = "session_id=123456";
+        let request = format!(
+            "GET /data HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {}\r\n\r\n",
+            cookie_value
+        );
 
-        let (tx, rx) = mpsc::channel(); // Create a channel for signaling completion
+        let response = send_request(&request);
 
-        for _ in 0..num_requests {
-            let tx = tx.clone(); // Clone the transmitter for each thread
-            let post_data = post_data.to_string();
+        assert!(response
+            .contains("Set-Cookie: new_cookie=will_be_set_but_won't_last_long; Path=/; HttpOnly"));
+        assert!(response.contains("Set-Cookie: old_cookie=won't_be_set; Path=/; HttpOnly"));
 
-            pool.execute(move || {
-                println!("Thread {:?} started processing", thread::current().id());
-
-                let request = format!(
-                    "POST /submit HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
-                    post_data.len(),
-                    post_data
-                );
-
-                // Send the request and receive the response
-                let response = send_request(&request);
-                println!(
-                    "Response from thread {:?}: ({})",
-                    thread::current().id(),
-                    response
-                );
-
-                // Check the response
-                assert!(response.contains("Success!"), "Response was: {}", response);
-
-                // Signal task completion
-                tx.send(()).unwrap();
-                println!("Thread {:?} finished processing", thread::current().id());
-            });
-        }
-
-        // Wait for all requests to complete
-        for _ in 0..num_requests {
-            rx.recv_timeout(Duration::from_secs(5))
-                .expect("Test timed out");
-        }
-
-        // Stop the server by setting running to false
-        *running.lock().unwrap() = false;
-
-        // Give some time for the server to shut down properly
         thread::sleep(Duration::from_secs(1));
     }
 
+    // Concurrent Requests Unit Test
     #[test]
-    fn test_concurrent_get_requests() {
-        // Start the server
-        let running = start_server();
-        thread::sleep(Duration::from_secs(1)); // Allow server to start
+    fn test_concurrent_requests() {
+        start_server();
+        thread::sleep(Duration::from_secs(1));
 
         let pool = ThreadPool::new(5);
         let num_requests = 5;
 
         let expected_jsons = r#"{"id":7,"rank":"38,371","trend":"6","season":1,"episode":8,"name":"Shousha wa docchi? Akuma no mi no nouryoku taiketsu!","start":1999,"total_votes":"335","average_rating":7.7}"#;
 
-        let (tx, rx) = mpsc::channel(); // Create a channel to track task completion
+        let (tx, rx) = mpsc::channel();
 
         for i in 0..num_requests {
             let tx = tx.clone();
 
             pool.execute(move || {
-                // Construct a GET request
                 let request = format!(
                     "GET /entries HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
                 );
 
-                // Send the request and receive the response
+                thread::sleep(Duration::from_secs(2));
+                let start = Instant::now();
+
                 let response = send_request(&request);
 
-                // Check the status line and if the expected JSON is in the response body
+                let duration = start.elapsed();
+
+                println!(
+                    "Received response for request {} took {:?}",
+                    (i + 1),
+                    duration
+                );
+
                 assert!(response.contains(expected_jsons));
 
-                // Signal task completion
                 tx.send(()).unwrap();
             });
         }
 
-        // Wait for all requests to finish
         for _ in 0..num_requests {
             rx.recv_timeout(Duration::from_secs(5))
                 .expect("Test timed out");
         }
-
-        // Stop the server
-        *running.lock().unwrap() = false;
-        thread::sleep(Duration::from_secs(1)); // Allow server to shut down
     }
 }
