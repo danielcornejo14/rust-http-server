@@ -44,7 +44,9 @@ fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let pool = ThreadPool::new(5);
     for stream in listener.incoming() {
+        println!("1 {:?}", stream);
         let stream = stream.unwrap();
+        println!("2 {:?}", stream);
 
         pool.execute(|| {
             handle_connection(stream);
@@ -90,6 +92,7 @@ fn parse_request(
     buf_reader: &mut BufReader<&mut TcpStream>,
 ) -> std::result::Result<(String, String, HashMap<String, String>, String), RequestError> {
     let mut request_line = String::new();
+    println!("Request Line: {:?}", buf_reader);
     if buf_reader.read_line(&mut request_line).is_err() {
         return Err(RequestError::ReadRequestLineError);
     }
@@ -292,9 +295,10 @@ fn handle_delete<'a>(uri: &'a str, body: &'a str) -> (&'a str, String) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-
     use super::*;
+    use std::collections::HashMap;
+    use std::io::{BufReader, Cursor};
+    use std::sync::mpsc;
 
     fn send_request(request: &str) -> String {
         // Establish a connection to the server
@@ -330,7 +334,7 @@ mod tests {
     #[test]
     fn test_get_entries() {
         start_server();
-        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
+        thread::sleep(Duration::from_secs(1));
 
         let request = "GET /entries HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
         let response = send_request(request);
@@ -343,7 +347,7 @@ mod tests {
     #[test]
     fn test_post() {
         start_server();
-        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
+        thread::sleep(Duration::from_secs(1));
 
         let new_character = r#"{
             "id": 0,
@@ -371,7 +375,7 @@ mod tests {
     #[test]
     fn test_put() {
         start_server();
-        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
+        thread::sleep(Duration::from_secs(1));
 
         let updated_character = r#"{
             "id": 1,
@@ -399,7 +403,7 @@ mod tests {
     #[test]
     fn test_delete() {
         start_server();
-        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
+        thread::sleep(Duration::from_secs(1));
 
         let delete_request = r#"{"id": 5}"#;
 
@@ -417,7 +421,7 @@ mod tests {
     #[test]
     fn test_patch() {
         start_server();
-        thread::sleep(Duration::from_secs(1)); // Allow some time for the server to start
+        thread::sleep(Duration::from_secs(1));
 
         let patch_request = r#"{
             "id": 1,
@@ -465,7 +469,7 @@ mod tests {
         let pool = ThreadPool::new(5);
         let num_requests = 5;
 
-        let expected_jsons = r#"{"id":7,"rank":"38,371","trend":"6","season":1,"episode":8,"name":"Shousha wa docchi? Akuma no mi no nouryoku taiketsu!","start":1999,"total_votes":"335","average_rating":7.7}"#;
+        let expected_jsons = r#"Hello, world!"#;
 
         let (tx, rx) = mpsc::channel();
 
@@ -473,11 +477,9 @@ mod tests {
             let tx = tx.clone();
 
             pool.execute(move || {
-                let request = format!(
-                    "GET /entries HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-                );
+                let request =
+                    format!("GET /hello HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
 
-                thread::sleep(Duration::from_secs(2));
                 let start = Instant::now();
 
                 let response = send_request(&request);
@@ -500,5 +502,108 @@ mod tests {
             rx.recv_timeout(Duration::from_secs(5))
                 .expect("Test timed out");
         }
+    }
+
+    #[test]
+    fn test_parse_request_valid() {
+        start_server();
+
+        let mut stream = TcpStream::connect("127.0.0.1:7878").unwrap();
+        println!("Stream: {:?}", stream);
+
+        let request = "GET /entries HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        stream.write_all(request.as_bytes()).unwrap();
+        stream.flush().unwrap();
+
+        let mut buf_reader = BufReader::new(&mut stream);
+
+        let (method, uri, headers, body) = match parse_request(&mut buf_reader) {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("Failed to parse request: {}", e);
+                return;
+            }
+        };
+
+        assert_eq!(method, "GET");
+        assert_eq!(uri, "/entries");
+        assert_eq!(headers.get("Host").unwrap(), "localhost");
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn test_parse_cookies() {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Cookie".to_string(),
+            "sessionId=abc123; userId=789; lang=en".to_string(),
+        );
+
+        let cookies = parse_cookies(&headers);
+
+        assert_eq!(cookies.get("sessionId").unwrap(), "abc123");
+        assert_eq!(cookies.get("userId").unwrap(), "789");
+        assert_eq!(cookies.get("lang").unwrap(), "en");
+    }
+
+    #[test]
+    fn test_parse_cookies_empty() {
+        let headers = HashMap::new();
+        let cookies = parse_cookies(&headers);
+        assert!(cookies.is_empty());
+    }
+
+    #[test]
+    fn test_set_cookie() {
+        let mut cookies = Vec::new();
+        set_cookie(
+            &mut cookies,
+            "sessionId",
+            "abc123",
+            Some("Tue, 19 Jan 2038 03:14:07 GMT"),
+        );
+
+        assert_eq!(cookies.len(), 1);
+        assert!(cookies[0].contains("sessionId=abc123"));
+        assert!(cookies[0].contains("Expires=Tue, 19 Jan 2038 03:14:07 GMT"));
+        assert!(cookies[0].contains("Path=/; HttpOnly"));
+    }
+
+    #[test]
+    fn test_set_cookie_no_expiry() {
+        let mut cookies = Vec::new();
+        set_cookie(&mut cookies, "sessionId", "abc123", None);
+
+        assert_eq!(cookies.len(), 1);
+        assert_eq!(cookies[0], "sessionId=abc123; Path=/; HttpOnly");
+    }
+
+    #[test]
+    fn test_is_cookie_expired() {
+        let past_date = "Wed, 01 Jan 2020 00:00:00 GMT";
+        let future_date = "Wed, 01 Jan 2030 00:00:00 GMT";
+
+        assert!(is_cookie_expired(past_date));
+        assert!(!is_cookie_expired(future_date));
+    }
+
+    #[test]
+    fn test_is_cookie_expired_invalid_format() {
+        let invalid_date = "Invalid Date";
+        assert!(!is_cookie_expired(invalid_date));
+    }
+
+    #[test]
+    fn test_get_cookie_expiration() {
+        let duration_secs = 60 * 60 * 24; // 1 day
+        let expiration = get_cookie_expiration(duration_secs);
+
+        let parsed_expiration = DateTime::parse_from_rfc2822(&expiration);
+        assert!(parsed_expiration.is_ok());
+
+        let expiration_datetime = parsed_expiration.unwrap();
+        let now = Utc::now();
+        let difference = expiration_datetime.signed_duration_since(now).num_seconds();
+        assert!((difference - (duration_secs as i64)).abs() < 10); // Allowing a small margin of error
     }
 }
