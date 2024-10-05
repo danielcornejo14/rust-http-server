@@ -442,9 +442,11 @@ mod tests {
     // Cookie Management Unit Tests
     #[test]
     fn test_cookie_management() {
+        // Start the server
         start_server();
         std::thread::sleep(Duration::from_secs(1));
 
+        // Send a request with cookies
         let cookie_value = "session_id=123456";
         let request = format!(
             "GET /data HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {}\r\n\r\n",
@@ -463,6 +465,7 @@ mod tests {
     // Concurrent Requests Unit Test
     #[test]
     fn test_concurrent_requests() {
+        // Start the server
         start_server();
         thread::sleep(Duration::from_secs(1));
 
@@ -473,13 +476,16 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
 
+        // Send multiple requests concurrently
         for i in 0..num_requests {
             let tx = tx.clone();
 
+            // Send a request in a separate thread
             pool.execute(move || {
                 let request =
                     format!("GET /hello HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
 
+                // Measure the time taken to receive the response
                 let start = Instant::now();
 
                 let response = send_request(&request);
@@ -498,6 +504,7 @@ mod tests {
             });
         }
 
+        // Wait for all requests to complete
         for _ in 0..num_requests {
             rx.recv_timeout(Duration::from_secs(5))
                 .expect("Test timed out");
@@ -507,16 +514,18 @@ mod tests {
     #[test]
     fn test_parse_request_valid() {
         start_server();
-
+        // Wait for the server to start
         let mut stream = TcpStream::connect("127.0.0.1:7878").unwrap();
         println!("Stream: {:?}", stream);
 
+        // Send a valid GET request
         let request = "GET /entries HTTP/1.1\r\nHost: localhost\r\n\r\n";
         stream.write_all(request.as_bytes()).unwrap();
         stream.flush().unwrap();
 
         let mut buf_reader = BufReader::new(&mut stream);
 
+        // Parse the request
         let (method, uri, headers, body) = match parse_request(&mut buf_reader) {
             Ok(result) => result,
             Err(e) => {
@@ -525,6 +534,7 @@ mod tests {
             }
         };
 
+        // Check the parsed values
         assert_eq!(method, "GET");
         assert_eq!(uri, "/entries");
         assert_eq!(headers.get("Host").unwrap(), "localhost");
@@ -539,8 +549,10 @@ mod tests {
             "sessionId=abc123; userId=789; lang=en".to_string(),
         );
 
+        // Parse cookies
         let cookies = parse_cookies(&headers);
 
+        // Check the parsed cookies
         assert_eq!(cookies.get("sessionId").unwrap(), "abc123");
         assert_eq!(cookies.get("userId").unwrap(), "789");
         assert_eq!(cookies.get("lang").unwrap(), "en");
@@ -548,6 +560,7 @@ mod tests {
 
     #[test]
     fn test_parse_cookies_empty() {
+        // No cookies in the headers
         let headers = HashMap::new();
         let cookies = parse_cookies(&headers);
         assert!(cookies.is_empty());
@@ -555,6 +568,7 @@ mod tests {
 
     #[test]
     fn test_set_cookie() {
+        // Set a cookie with an expiry date
         let mut cookies = Vec::new();
         set_cookie(
             &mut cookies,
@@ -563,6 +577,7 @@ mod tests {
             Some("Tue, 19 Jan 2038 03:14:07 GMT"),
         );
 
+        // Check the generated cookie
         assert_eq!(cookies.len(), 1);
         assert!(cookies[0].contains("sessionId=abc123"));
         assert!(cookies[0].contains("Expires=Tue, 19 Jan 2038 03:14:07 GMT"));
@@ -571,36 +586,44 @@ mod tests {
 
     #[test]
     fn test_set_cookie_no_expiry() {
+        // Set a cookie without an expiry date
         let mut cookies = Vec::new();
         set_cookie(&mut cookies, "sessionId", "abc123", None);
 
+        // Check the generated cookie
         assert_eq!(cookies.len(), 1);
         assert_eq!(cookies[0], "sessionId=abc123; Path=/; HttpOnly");
     }
 
     #[test]
     fn test_is_cookie_expired() {
+        // Check if a past date is expired and a future date is not
         let past_date = "Wed, 01 Jan 2020 00:00:00 GMT";
         let future_date = "Wed, 01 Jan 2030 00:00:00 GMT";
 
+        // Check the expiration status
         assert!(is_cookie_expired(past_date));
         assert!(!is_cookie_expired(future_date));
     }
 
     #[test]
     fn test_is_cookie_expired_invalid_format() {
+        // Check an invalid date format
         let invalid_date = "Invalid Date";
         assert!(!is_cookie_expired(invalid_date));
     }
 
     #[test]
     fn test_get_cookie_expiration() {
+        // Get the expiration date for a cookie
         let duration_secs = 60 * 60 * 24; // 1 day
         let expiration = get_cookie_expiration(duration_secs);
 
+        // Parse the expiration date
         let parsed_expiration = DateTime::parse_from_rfc2822(&expiration);
         assert!(parsed_expiration.is_ok());
 
+        // Check the expiration time
         let expiration_datetime = parsed_expiration.unwrap();
         let now = Utc::now();
         let difference = expiration_datetime.signed_duration_since(now).num_seconds();
