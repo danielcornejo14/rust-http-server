@@ -314,9 +314,11 @@ mod tests {
     }
 
     fn start_server() {
+        // Check if the server is already running
         if TcpStream::connect("127.0.0.1:7878").is_ok() {
             return;
         }
+        // Start the server in a separate thread
         thread::spawn(|| {
             let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
             let pool = ThreadPool::new(5);
@@ -333,22 +335,26 @@ mod tests {
     // HTTP Operations Unit Tests
     #[test]
     fn test_get_entries() {
+        // Start the server
         start_server();
         thread::sleep(Duration::from_secs(1));
 
+        // Send a GET request
         let request = "GET /entries HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
         let response = send_request(request);
-
         let expected_json = r#"{"id":3,"rank":"28,818","trend":"8","season":1,"episode":4,"name":"Luffy's Past! The Red-haired Shanks Appears!","start":1999,"total_votes":"449","average_rating":8.1}"#;
 
+        // Check the response
         assert!(response.contains(expected_json));
     }
 
     #[test]
     fn test_post() {
+        // Start the server
         start_server();
         thread::sleep(Duration::from_secs(1));
 
+        // Add a new character
         let new_character = r#"{
             "id": 0,
             "rank": "32,043", 
@@ -361,12 +367,14 @@ mod tests {
             "average_rating": 7.7
         }"#;
 
+        // Create a POST request
         let request = format!(
             "POST /submit HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
             new_character.len(),
             new_character
         );
 
+        // Send the request
         let response = send_request(&request);
         println!("Response:({})", response);
         assert!(response.contains("Success!"));
@@ -374,9 +382,11 @@ mod tests {
 
     #[test]
     fn test_put() {
+        // Start the server
         start_server();
         thread::sleep(Duration::from_secs(1));
 
+        // Update an existing character
         let updated_character = r#"{
             "id": 1,
             "rank": "32,043", 
@@ -389,12 +399,14 @@ mod tests {
             "average_rating": 7.7
         }"#;
 
+        // Create a PUT request
         let request = format!(
             "PUT /put_entry HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
             updated_character.len(),
             updated_character
         );
 
+        // Send the request
         let response = send_request(&request);
         println!("Response:({})", response);
         assert!(response.contains("Success!"));
@@ -402,17 +414,19 @@ mod tests {
 
     #[test]
     fn test_delete() {
+        // Start the server
         start_server();
         thread::sleep(Duration::from_secs(1));
 
+        // Create a DELETE request
         let delete_request = r#"{"id": 5}"#;
-
         let request = format!(
             "DELETE /delete_entry HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
             delete_request.len(),
             delete_request
         );
 
+        // Send the request
         let response = send_request(&request);
         println!("Response:({})", response);
         assert!(response.contains("Success!"));
@@ -420,20 +434,24 @@ mod tests {
 
     #[test]
     fn test_patch() {
+        // Start the server
         start_server();
         thread::sleep(Duration::from_secs(1));
 
+        // Create a PATCH request
         let patch_request = r#"{
             "id": 1,
             "name": "Pirate King Luffy"
         }"#;
 
+        // Create a PATCH request
         let request = format!(
             "PATCH /patch_entry_name HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
             patch_request.len(),
             patch_request
         );
 
+        // Send the request
         let response = send_request(&request);
         println!("Response:({})", response);
         assert!(response.contains("Success"));
@@ -453,8 +471,10 @@ mod tests {
             cookie_value
         );
 
+        // Send the request
         let response = send_request(&request);
 
+        // Check the response
         assert!(response
             .contains("Set-Cookie: new_cookie=will_be_set_but_won't_last_long; Path=/; HttpOnly"));
         assert!(response.contains("Set-Cookie: old_cookie=won't_be_set; Path=/; HttpOnly"));
